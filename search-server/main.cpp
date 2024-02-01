@@ -59,9 +59,10 @@ public:
 
     void AddDocument(int document_id, const string& document) {
         const vector<string> words = SplitIntoWordsNoStop(document);
+        const double one_divided_n = 1.0 / words.size();
       
         for (const string& word : words) {
-            word_to_document_freqs_[word][document_id] += 1.0 / words.size();
+            word_to_document_freqs_[word][document_id] += one_divided_n;
         }
         document_count_++;
     }
@@ -119,14 +120,18 @@ private:
         return query;
     }
 
+    double ComputeIDF(const string& word) const {
+        return log(static_cast<double>(document_count_) 
+                   / word_to_document_freqs_.at(word).size());
+    }
+
     vector<Document> FindAllDocuments(const Query& query) const {
         map<int, double> document_to_relevance;
         vector<Document> matched_documents;
       
         for (const string& plus_word : query.plus_words) {
             if (word_to_document_freqs_.count(plus_word) > 0) {
-                const double idf = log(static_cast<double>(document_count_) / 
-                                       word_to_document_freqs_.at(plus_word).size());
+                const double idf = ComputeIDF(plus_word);
                 for (const auto& [document_id, tf] : word_to_document_freqs_.at(plus_word))
                     document_to_relevance[document_id] += tf * idf;
             }
