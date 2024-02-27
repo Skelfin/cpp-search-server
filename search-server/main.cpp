@@ -88,8 +88,8 @@ public:
     explicit SearchServer(const StringContainer& stop_words)
         : stop_words_(MakeUniqueNonEmptyStrings(stop_words)) {
         for (const auto& word : stop_words_) {
-            if (ContainsInvalidCharacters(word)) {
-                throw invalid_argument("Стоп-слова содержат недопустимые символы.");
+            if (!IsValidWord(word)) {
+                throw invalid_argument("Стоп-слова содержат недопустимые символы."s);
             }
         }
     }
@@ -102,18 +102,15 @@ public:
 
     void AddDocument(int document_id, const string& document, DocumentStatus status,
         const vector<int>& ratings) {
-        vector<string> words;
+
+        vector<string> words = SplitIntoWordsNoStop(document);
 
         if (document_id < 0) {
-            throw invalid_argument("Идентификатор документа должен быть неотрицательным.");
+            throw invalid_argument("Идентификатор документа должен быть неотрицательным."s);
         }
 
         if (documents_.count(document_id) > 0) {
-            throw invalid_argument("Документ с таким идентификатором уже существует.");
-        }
-
-        if (!SplitIntoWordsNoStop(document, words) || !IsValidWord(document)) {
-            throw invalid_argument("Документ содержит недопустимые символы");
+            throw invalid_argument("Документ с таким идентификатором уже существует."s);
         }
 
         const double inv_word_count = 1.0 / words.size();
@@ -122,7 +119,7 @@ public:
             word_to_document_freqs_[word][document_id] += inv_word_count;
         }
         documents_.emplace(document_id, DocumentData{ ComputeAverageRating(ratings), status });
-
+        document_ids_.push_back(document_id);
     }
 
     template <typename DocumentPredicate>
@@ -161,7 +158,7 @@ public:
             return FindTopDocuments(raw_query, DocumentStatus::ACTUAL);
         }
         catch (const invalid_argument& e) {
-            throw invalid_argument("Неверный запрос: " + string(e.what()));
+            throw invalid_argument("Неверный запрос: "s + string(e.what()));
         }
     }
 
@@ -191,12 +188,10 @@ public:
     }
 
     int GetDocumentId(int index) const {
-        if (index < 0 || index >= documents_.size()) {
-            throw out_of_range("Индекс выходит за пределы диапазона");
+        if (index < 0 || index >= document_ids_.size()) {
+            throw out_of_range("Индекс выходит за пределы диапазона"s);
         }
-        auto it = documents_.begin();
-        advance(it, index);
-        return it->first;
+        return document_ids_[index];
     }
 
 private:
@@ -207,23 +202,33 @@ private:
     const set<string> stop_words_;
     map<string, map<int, double>> word_to_document_freqs_;
     map<int, DocumentData> documents_;
+    vector<int> document_ids_;
 
     bool IsStopWord(const string& word) const {
         return stop_words_.count(word) > 0;
     }
 
-    bool SplitIntoWordsNoStop(const string& text, vector<string>& words) const {
-        if (!IsValidWord(text)) {
-            return false;
-        }
+    struct QueryWord {
+        string data;
+        bool is_minus;
+        bool is_stop;
+    };
 
+    //честно признаюсь с этим методом просил помощи у одногрупников
+    //коментарий "метод должен просто вернуть QueryWord" очень сильно смутил
+    vector<string> SplitIntoWordsNoStop(const string& text) const { 
+        vector<string> words;
         for (const string& word : SplitIntoWords(text)) {
+            if (!IsValidWord(word)) {
+                throw invalid_argument("Присутствуют недопустимые символы"s);
+            }
             if (!IsStopWord(word)) {
                 words.push_back(word);
             }
         }
-        return true;
+        return words;
     }
+
 
     static int ComputeAverageRating(const vector<int>& ratings) {
         if (ratings.empty()) {
@@ -233,15 +238,10 @@ private:
         return rating_sum / static_cast<int>(ratings.size());
     }
 
-    struct QueryWord {
-        string data;
-        bool is_minus;
-        bool is_stop;
-    };
 
     QueryWord ParseQueryWord(string text) const {
         bool is_minus = false;
-        if (text[0] == '-') {
+        if (IsTextValid(text)) {
             is_minus = true;
             text = text.substr(1);
         }
@@ -255,7 +255,7 @@ private:
 
     void ParseQuery(const string& text, Query& query) const {
         if (!IsValidWord(text)) {
-            throw invalid_argument("Запрос содержит недопустимые символы");
+            throw invalid_argument("Запрос содержит недопустимые символы"s);
         }
 
         int current = 0;
@@ -276,12 +276,14 @@ private:
             }
         }
         if (current != 0) {
-            throw invalid_argument("Неверный формат запроса");
+            throw invalid_argument("Неверный формат запроса"s);
         }
     }
 
     static bool IsTextValid(const string& word) {
-        return word.empty() || word.at(0) == '-' || word.at(word.size() - 1) == '-';
+        return word.empty() || word.at(0) == '-';
+        //word.at(word.size() - 1) по моей логике проверяла не является ли последняя буква "-", но
+        //проверив еще раз понял, что я написал лютейшую бредядину, которая не должна существовать :)
     }
 
     double ComputeWordInverseDocumentFreq(const string& word) const {
@@ -327,13 +329,9 @@ private:
             return c >= '\0' && c < ' ';
             });
     }
-
-    static bool ContainsInvalidCharacters(const string& word) {
-        return any_of(word.begin(), word.end(), [](char c) {
-            return c >= '\0' && c < ' ';
-            });
-    }
-
+    //Отличались методы буквально только none_of
+    //и any_of. А существовали они вместе из-за
+    //того что я забыл поставить "!" 91 строке :/
 };
 
 // ==================== для примера =========================
