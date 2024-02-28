@@ -83,7 +83,6 @@ enum class DocumentStatus {
 
 class SearchServer {
 public:
-    inline static constexpr int INVALID_DOCUMENT_ID = -1;
     template <typename StringContainer>
     explicit SearchServer(const StringContainer& stop_words)
         : stop_words_(MakeUniqueNonEmptyStrings(stop_words)) {
@@ -154,12 +153,8 @@ public:
     }
 
     vector<Document> FindTopDocuments(const string& raw_query) const {
-        try {
-            return FindTopDocuments(raw_query, DocumentStatus::ACTUAL);
-        }
-        catch (const invalid_argument& e) {
-            throw invalid_argument("Неверный запрос: "s + string(e.what()));
-        }
+        return FindTopDocuments(raw_query, DocumentStatus::ACTUAL);
+        throw invalid_argument("Недопустимый запрос"s);
     }
 
     int GetDocumentCount() const {
@@ -188,11 +183,10 @@ public:
     }
 
     int GetDocumentId(int index) const {
-        if (index < 0 || index >= document_ids_.size()) {
-            throw out_of_range("Индекс выходит за пределы диапазона"s);
-        }
-        return document_ids_[index];
+        return document_ids_.at(index);
+        throw out_of_range("Некорректный индекс документа"s);
     }
+
 
 private:
     struct DocumentData {
@@ -208,15 +202,7 @@ private:
         return stop_words_.count(word) > 0;
     }
 
-    struct QueryWord {
-        string data;
-        bool is_minus;
-        bool is_stop;
-    };
-
-    //честно признаюсь с этим методом просил помощи у одногрупников
-    //коментарий "метод должен просто вернуть QueryWord" очень сильно смутил
-    vector<string> SplitIntoWordsNoStop(const string& text) const { 
+    vector<string> SplitIntoWordsNoStop(const string& text) const {
         vector<string> words;
         for (const string& word : SplitIntoWords(text)) {
             if (!IsValidWord(word)) {
@@ -238,10 +224,15 @@ private:
         return rating_sum / static_cast<int>(ratings.size());
     }
 
+    struct QueryWord {
+        string data;
+        bool is_minus;
+        bool is_stop;
+    };
 
     QueryWord ParseQueryWord(string text) const {
         bool is_minus = false;
-        if (IsTextValid(text)) {
+        if (text[0] == '-') {
             is_minus = true;
             text = text.substr(1);
         }
@@ -257,34 +248,36 @@ private:
         if (!IsValidWord(text)) {
             throw invalid_argument("Запрос содержит недопустимые символы"s);
         }
-
-        int current = 0;
+        bool current_minus_word = false;
         for (const string& word : SplitIntoWords(text)) {
             const QueryWord query_word = ParseQueryWord(word);
 
             if (!query_word.is_stop) {
-                if (query_word.is_minus && !IsTextValid(query_word.data)) {
+                if (query_word.is_minus && !(query_word.data.empty() || query_word.data[0] == '-')) {
                     query.minus_words.insert(query_word.data);
                 }
                 else if (!query_word.is_minus) {
                     query.plus_words.insert(query_word.data);
                 }
                 else {
-                    ++current;
+                    current_minus_word = true;
                     break;
                 }
             }
         }
-        if (current != 0) {
+        if (current_minus_word) {
             throw invalid_argument("Неверный формат запроса"s);
         }
     }
 
-    static bool IsTextValid(const string& word) {
-        return word.empty() || word.at(0) == '-';
-        //word.at(word.size() - 1) по моей логике проверяла не является ли последняя буква "-", но
-        //проверив еще раз понял, что я написал лютейшую бредядину, которая не должна существовать :)
-    }
+    //static bool IsTextValid(const string& word) {
+    //    return word.empty() || word.at(0) == '-';
+    //}
+    //Не понял комментария насчет этого метода.
+    //А зачем его переносить в ParseQueryWord, если он использовался в ParseQuery?
+    //P.S раньше этот метод я написал в if-е вместо text[0] == '-', но потом понял, что
+    //Это бессмысленно и убрал, но в код-ревью попал как раз if с этим методом.
+    
 
     double ComputeWordInverseDocumentFreq(const string& word) const {
         return log(GetDocumentCount() * 1.0 / word_to_document_freqs_.at(word).size());
@@ -329,9 +322,6 @@ private:
             return c >= '\0' && c < ' ';
             });
     }
-    //Отличались методы буквально только none_of
-    //и any_of. А существовали они вместе из-за
-    //того что я забыл поставить "!" 91 строке :/
 };
 
 // ==================== для примера =========================
