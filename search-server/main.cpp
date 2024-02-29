@@ -88,7 +88,7 @@ public:
         : stop_words_(MakeUniqueNonEmptyStrings(stop_words)) {
         for (const auto& word : stop_words_) {
             if (!IsValidWord(word)) {
-                throw invalid_argument("Стоп-слова содержат недопустимые символы."s);
+                throw invalid_argument("Стоп слово: "s + word + " содержит недопустимые символы"s);
             }
         }
     }
@@ -124,8 +124,7 @@ public:
     template <typename DocumentPredicate>
     vector<Document> FindTopDocuments(const string& raw_query,
         DocumentPredicate document_predicate) const {
-        Query query;
-        ParseQuery(raw_query, query);
+        const Query query = ParseQuery(raw_query);
         auto result = FindAllDocuments(query, document_predicate);
 
         sort(result.begin(), result.end(),
@@ -154,7 +153,9 @@ public:
 
     vector<Document> FindTopDocuments(const string& raw_query) const {
         return FindTopDocuments(raw_query, DocumentStatus::ACTUAL);
-        throw invalid_argument("Недопустимый запрос"s);
+        //Я правильно понимаю, что теперь смысл в исключении
+        //здесь нет, потому что все нужные исключения
+        //прошли еще в ParseQueryWord?
     }
 
     int GetDocumentCount() const {
@@ -164,8 +165,7 @@ public:
     tuple<vector<string>, DocumentStatus> MatchDocument(const string& raw_query,
         int document_id) const {
         vector<string> matched_words;
-        Query query;
-        ParseQuery(raw_query, query);
+        const Query query = ParseQuery(raw_query);
 
         for (const string& word : query.plus_words) {
             if (word_to_document_freqs_.count(word) && word_to_document_freqs_.at(word).count(document_id)) {
@@ -183,8 +183,10 @@ public:
     }
 
     int GetDocumentId(int index) const {
-        return document_ids_.at(index);
-        throw out_of_range("Некорректный индекс документа"s);
+        if ((index >= 0) && (index < documents_.size())) {
+            return document_ids_.at(index);
+        }
+        throw out_of_range("Индекс выходит за пределы диапазона");
     }
 
 
@@ -206,7 +208,7 @@ private:
         vector<string> words;
         for (const string& word : SplitIntoWords(text)) {
             if (!IsValidWord(word)) {
-                throw invalid_argument("Присутствуют недопустимые символы"s);
+                throw invalid_argument("Слово: "s + word + " недопустимо в документе"s);
             }
             if (!IsStopWord(word)) {
                 words.push_back(word);
@@ -232,10 +234,18 @@ private:
 
     QueryWord ParseQueryWord(string text) const {
         bool is_minus = false;
+        if (!IsValidWord(text)) {
+            throw invalid_argument("Слово: "s + text + " недопустимо"s);
+        }
         if (text[0] == '-') {
             is_minus = true;
             text = text.substr(1);
         }
+        if (text.empty() ||text.at(0) == '-') {
+            throw invalid_argument("Слово или символ: "s + "-"s + text + " недействительно"s);
+        }
+        //Надеюсь, что я правильно понял посыл ответа.
+        //Ну и еще я подогнал логику ошибок под ваш ответ :)
         return { text, is_minus, IsStopWord(text) };
     }
 
@@ -244,40 +254,22 @@ private:
         set<string> minus_words;
     };
 
-    void ParseQuery(const string& text, Query& query) const {
-        if (!IsValidWord(text)) {
-            throw invalid_argument("Запрос содержит недопустимые символы"s);
-        }
-        bool current_minus_word = false;
+    Query ParseQuery(const string& text) const {
+        Query query;
         for (const string& word : SplitIntoWords(text)) {
             const QueryWord query_word = ParseQueryWord(word);
 
             if (!query_word.is_stop) {
-                if (query_word.is_minus && !(query_word.data.empty() || query_word.data[0] == '-')) {
+                if (query_word.is_minus) {
                     query.minus_words.insert(query_word.data);
                 }
-                else if (!query_word.is_minus) {
-                    query.plus_words.insert(query_word.data);
-                }
                 else {
-                    current_minus_word = true;
-                    break;
+                    query.plus_words.insert(query_word.data);
                 }
             }
         }
-        if (current_minus_word) {
-            throw invalid_argument("Неверный формат запроса"s);
-        }
+        return query;
     }
-
-    //static bool IsTextValid(const string& word) {
-    //    return word.empty() || word.at(0) == '-';
-    //}
-    //Не понял комментария насчет этого метода.
-    //А зачем его переносить в ParseQueryWord, если он использовался в ParseQuery?
-    //P.S раньше этот метод я написал в if-е вместо text[0] == '-', но потом понял, что
-    //Это бессмысленно и убрал, но в код-ревью попал как раз if с этим методом.
-    
 
     double ComputeWordInverseDocumentFreq(const string& word) const {
         return log(GetDocumentCount() * 1.0 / word_to_document_freqs_.at(word).size());
